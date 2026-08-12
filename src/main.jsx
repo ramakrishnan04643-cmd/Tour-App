@@ -4,63 +4,101 @@ import TourLedger from "./TourLedger.jsx";
 
 /**
  * Tour Ledger was originally built for Claude.ai's artifact environment,
- * which provides a `window.storage` API (get/set/delete/list) with a
- * "shared" flag that makes data visible to everyone using the artifact.
- * That API doesn't exist in a normal browser, so it won't work as-is once
- * hosted on GitHub Pages or any other static host.
+ * which provides a `window.storage` API. Calls made with `shared: true`
+ * were visible to everyone using the app; calls made with `shared: false`
+ * were private to each person's own Claude account.
  *
- * This shim below makes the app RUNNABLE outside Claude by backing
- * window.storage with the browser's localStorage. Read this as a stopgap,
- * not a real fix:
+ * Outside Claude there's no such built-in identity or shared database, so
+ * this file recreates the same `window.storage` shape using two things:
  *
- *   - There is no "shared" data anymore. Every visitor's browser has its
- *     own separate localStorage, so people will NOT see each other's
- *     trips or expenses just by opening the same URL. Each person would
- *     effectively be using their own private copy of the app.
- *   - Data lives only in that one browser. Clearing site data, switching
- *     browsers, or using a different device loses it.
+ *   - shared: true  -> calls the Tour Ledger API (Express + Postgres,
+ *     hosted on Render). This is REAL shared data — every device talking
+ *     to the same API sees the same trips and expenses.
+ *   - shared: false -> stays in this browser's localStorage. Right now
+ *     the app only uses this for "session" (remembering who's logged in
+ *     on this device), which is genuinely device-specific by design —
+ *     that part doesn't need to be shared.
  *
- * To get real shared, multi-device syncing back, `window.storage` needs
- * to be replaced with calls to a real backend (e.g. Firebase, Supabase,
- * or your own API) that everyone's browser talks to. That's a separate,
- * bigger change from this shim.
+ * Set VITE_API_URL (see .env.example) to your deployed backend's URL.
  */
-if (!window.storage) {
-  const read = () => {
+
+const API_BASE = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
+
+if (!API_BASE) {
+  console.warn(
+    "VITE_API_URL is not set. Shared data (trips, accounts, expenses) will fail. " +
+      "Set it to your Render backend URL, e.g. https://tour-ledger-api.onrender.com"
+  );
+}
+
+const localScope = {
+  read() {
     try {
-      return JSON.parse(localStorage.getItem("tour-ledger-data") || "{}");
+      return JSON.parse(localStorage.getItem("tour-ledger-local") || "{}");
     } catch {
       return {};
     }
-  };
-  const write = (data) => localStorage.setItem("tour-ledger-data", JSON.stringify(data));
+  },
+  write(data) {
+    localStorage.setItem("tour-ledger-local", JSON.stringify(data));
+  },
+};
 
-  window.storage = {
-    async get(key) {
-      const data = read();
+window.storage = {
+  async get(key, shared = false) {
+    if (!shared) {
+      const data = localScope.read();
       if (!(key in data)) return null;
       return { key, value: data[key], shared: false };
-    },
-    async set(key, value) {
-      const data = read();
+    }
+    const res = await fetch(`${API_BASE}/api/storage/${encodeURIComponent(key)}`);
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`storage get failed (${res.status})`);
+    const json = await res.json();
+    return { key, value: json.value, shared: true };
+  },
+
+  async set(key, value, shared = false) {
+    if (!shared) {
+      const data = localScope.read();
       data[key] = value;
-      write(data);
+      localScope.write(data);
       return { key, value, shared: false };
-    },
-    async delete(key) {
-      const data = read();
+    }
+    const res = await fetch(`${API_BASE}/api/storage/${encodeURIComponent(key)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ value }),
+    });
+    if (!res.ok) throw new Error(`storage set failed (${res.status})`);
+    return { key, value, shared: true };
+  },
+
+  async delete(key, shared = false) {
+    if (!shared) {
+      const data = localScope.read();
       const existed = key in data;
       delete data[key];
-      write(data);
+      localScope.write(data);
       return { key, deleted: existed, shared: false };
-    },
-    async list(prefix = "") {
-      const data = read();
-      const keys = Object.keys(data).filter((k) => k.startsWith(prefix));
-      return { keys, prefix, shared: false };
-    },
-  };
-}
+    }
+    const res = await fetch(`${API_BASE}/api/storage/${encodeURIComponent(key)}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(`storage delete failed (${res.status})`);
+    const json = await res.json();
+    return { key, deleted: !!json.deleted, shared: true };
+  },
+
+  async list(prefix = "", shared = false) {
+    if (!shared) {
+      const data = localScope.read();
+      return { keys: Object.keys(data).filter((k) => k.startsWith(prefix)), prefix, shared: false };
+    }
+    const res = await fetch(`${API_BASE}/api/storage?prefix=${encodeURIComponent(prefix)}`);
+    if (!res.ok) throw new Error(`storage list failed (${res.status})`);
+    const json = await res.json();
+    return { keys: json.keys, prefix, shared: true };
+  },
+};
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
