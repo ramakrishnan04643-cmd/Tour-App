@@ -370,7 +370,7 @@ function LoginScreen({ onLogin }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <div>
           <label className="tl-label">Your name</label>
-          <input className="tl-input" placeholder="Priya" value={name} onChange={(e) => setName(e.target.value)} />
+          <input className="tl-input" placeholder="Rama" value={name} onChange={(e) => setName(e.target.value)} />
         </div>
         <div>
           <label className="tl-label">{mode === "create" ? "Choose a PIN (4 to 6 digits)" : "PIN"}</label>
