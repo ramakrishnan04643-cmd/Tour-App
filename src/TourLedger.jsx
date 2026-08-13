@@ -370,7 +370,7 @@ function LoginScreen({ onLogin }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <div>
           <label className="tl-label">Your name</label>
-          <input className="tl-input" placeholder="Rama" value={name} onChange={(e) => setName(e.target.value)} />
+          <input className="tl-input" placeholder="Priya" value={name} onChange={(e) => setName(e.target.value)} />
         </div>
         <div>
           <label className="tl-label">{mode === "create" ? "Choose a PIN (4 to 6 digits)" : "PIN"}</label>
@@ -619,6 +619,10 @@ function DeleteTripModal({ trip, onCancel, onConfirm }) {
 
 function TripDetail({ trip, loading, session, isAdmin, onBack, onAddExpense, onDeleteExpense, onDeleteTrip, onEdit }) {
   const [showDeleteTrip, setShowDeleteTrip] = useState(false);
+  // Hooks must run in the same order on every render, so this is computed
+  // unconditionally (with a safe empty-array fallback) BEFORE the loading
+  // early-return below — never after it.
+  const totals = useMemoTotals(trip ? trip.expenses : []);
 
   if (loading || !trip) {
     return (
@@ -629,7 +633,6 @@ function TripDetail({ trip, loading, session, isAdmin, onBack, onAddExpense, onD
     );
   }
 
-  const totals = useMemoTotals(trip.expenses);
   const total = trip.expenses.reduce((s, e) => s + Number(e.amount || 0), 0);
 
   return (
